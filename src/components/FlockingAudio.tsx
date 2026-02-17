@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { STATIONS, getStationById } from '../data/stations';
+import {
+    parseShoutcastCurrentsong,
+    parseIcecastMetadata,
+    parseRadioJarMetadata
+} from '../utils/metadata';
 import * as THREE from "three";
 import { GPUComputationRenderer } from "three/addons/misc/GPUComputationRenderer.js";
 import { AppKitButton } from "@reown/appkit/react";
@@ -335,6 +340,8 @@ export default function FlockingAudio() {
 
     const currentStation = getStationById(currentStationId);
 
+
+
     const fetchMetadata = useCallback(async () => {
         if (!currentStation || !currentStation.metadataUrl) {
             setMetadata({
@@ -344,25 +351,52 @@ export default function FlockingAudio() {
             });
             return;
         }
-
-        if (!currentStation) return;
-
         try {
-            // Use Web3 Radio API (same as V2)
-            // https://webthreeradio.xyz/api/stream-metadata/:stationId
-            const apiUrl = `https://webthreeradio.xyz/api/stream-metadata/${currentStation.id}`;
-            const response = await fetch(apiUrl);
+            // Use proxy to avoid CORS for raw streams
+            const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(currentStation.metadataUrl);
+            const response = await fetch(proxyUrl);
 
-            if (response.ok) {
-                const data = await response.json();
-                if (data.nowPlaying) {
-                    setMetadata({
-                        title: data.nowPlaying.title || currentStation.name,
-                        artist: data.nowPlaying.artist || currentStation.description,
-                        artwork: data.nowPlaying.artwork || currentStation.image_url
-                    });
+            let rawData: any;
+            let text = '';
+
+            try {
+                text = await response.text();
+                try {
+                    rawData = JSON.parse(text);
+                } catch {
+                    // If JSON parse fails, rawData remains undefined
                 }
+            } catch (e) {
+                // Fetch failed
+                throw e;
             }
+
+            let parsedMetadata: any = null;
+
+            if (currentStation.type === 'shoutcast') {
+                // Shoutcast usually returns plain text via currentsong endpoint, or JSON
+                parsedMetadata = parseShoutcastCurrentsong(rawData?.raw || text, currentStation.name);
+            } else if (currentStation.type === 'icecast') {
+                parsedMetadata = parseIcecastMetadata(rawData, '/'); // Assuming mount is generic or root
+            } else if (currentStation.type === 'radiojar') {
+                parsedMetadata = parseRadioJarMetadata(rawData);
+            }
+
+            if (parsedMetadata) {
+                setMetadata({
+                    title: parsedMetadata.title,
+                    artist: parsedMetadata.artist,
+                    artwork: parsedMetadata.artwork || currentStation.image_url
+                });
+            } else {
+                // Fallback if parsing failed
+                setMetadata({
+                    title: currentStation.name,
+                    artist: currentStation.description,
+                    artwork: currentStation.image_url
+                });
+            }
+
         } catch (error) {
             console.error("Error fetching metadata:", error);
             // Fallback to station defaults
