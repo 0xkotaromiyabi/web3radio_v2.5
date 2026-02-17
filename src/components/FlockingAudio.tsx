@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { STATIONS, getStationById } from '../data/stations';
 import * as THREE from "three";
 import { GPUComputationRenderer } from "three/addons/misc/GPUComputationRenderer.js";
 import { AppKitButton } from "@reown/appkit/react";
@@ -321,37 +322,128 @@ export default function FlockingAudio() {
 
     const [isPlaying, setIsPlaying] = useState(false);
     const [volume, setVolume] = useState(0.5);
+    const [currentStationId, setCurrentStationId] = useState('web3');
+    const [rotation, setRotation] = useState(0);
+    const [armRotation, setArmRotation] = useState(-45);
+    const rotationIntervalRef = useRef<number | undefined>(undefined);
+    const armIntervalRef = useRef<number | undefined>(undefined);
     const [metadata, setMetadata] = useState({
         title: "Web3 Radio",
         artist: "3D Flocking Birds Stream",
         artwork: "https://webthreeradio.xyz/assets/web3radio-logo.png"
     });
 
-    const fetchMetadata = useCallback(async () => {
-        try {
-            const response = await fetch("https://webthreeradio.xyz/api/stream-metadata/web3");
-            const data = await response.json();
-            if (data && data.nowPlaying) {
-                const title = data.nowPlaying.title || "Web3 Radio";
-                const artist = data.nowPlaying.artist || "Decentralized Radio Station";
-                const artwork = data.nowPlaying.artwork || "https://webthreeradio.xyz/assets/web3radio-logo.png";
+    const currentStation = getStationById(currentStationId);
 
-                setMetadata(prev => {
-                    if (prev.title === title && prev.artist === artist && prev.artwork === artwork) return prev;
-                    return { title, artist, artwork };
-                });
+    const fetchMetadata = useCallback(async () => {
+        if (!currentStation || !currentStation.metadataUrl) {
+            setMetadata({
+                title: currentStation?.name || "Web3 Radio",
+                artist: currentStation?.description || "3D Flocking Birds Stream",
+                artwork: currentStation?.image_url || ""
+            });
+            return;
+        }
+
+        try {
+            // Special handling based on station type
+            if (currentStation.type === 'shoutcast') {
+                const response = await fetch(currentStation.metadataUrl);
+                const data = await response.json(); // Shoutcast JSON
+                // Handle Web3 Radio specific format or standard Shoutcast
+                if (data && data.nowPlaying) {
+                    setMetadata({
+                        title: data.nowPlaying.title || currentStation.name,
+                        artist: data.nowPlaying.artist || currentStation.description,
+                        artwork: data.nowPlaying.artwork || currentStation.image_url
+                    });
+                } else if (data) {
+                    // Standard Shoutcast JSON often has different structure, adjust as needed
+                    setMetadata({
+                        title: data.songtitle || currentStation.name,
+                        artist: currentStation.description,
+                        artwork: currentStation.image_url
+                    });
+                }
+            } else if (currentStation.type === 'icecast') {
+                // Icecast JSON (often status-json.xsl)
+                try {
+                    const response = await fetch(currentStation.metadataUrl);
+                    const data = await response.json();
+                    const source = data.icestats && data.icestats.source ?
+                        (Array.isArray(data.icestats.source) ? data.icestats.source[0] : data.icestats.source) : null;
+
+                    if (source && source.title) {
+                        const parts = source.title.split(' - ');
+                        setMetadata({
+                            title: parts.length > 1 ? parts[1] : source.title,
+                            artist: parts.length > 1 ? parts[0] : currentStation.name,
+                            artwork: currentStation.image_url // Icecast usually doesn't provide artwork in status-json
+                        });
+                    }
+                } catch (e) {
+                    console.warn("Icecast fetch failed", e);
+                    // Fallback
+                    setMetadata({
+                        title: currentStation.name,
+                        artist: currentStation.description,
+                        artwork: currentStation.image_url
+                    });
+                }
+
+            } else if (currentStation.type === 'radiojar') {
+                const response = await fetch(currentStation.metadataUrl);
+                const data = await response.json();
+                if (data && (data.title || data.artist)) {
+                    setMetadata({
+                        title: data.title || currentStation.name,
+                        artist: data.artist || currentStation.description,
+                        artwork: data.thumb || data.cover || currentStation.image_url
+                    });
+                }
+            } else {
+                // Plain text or generic JSON - try basic fetch
+                const response = await fetch(currentStation.metadataUrl);
+                const text = await response.text();
+                try {
+                    const json = JSON.parse(text);
+                    // Try to adhere to common formats
+                    if (json.title || json.song || json.track) {
+                        setMetadata({
+                            title: json.title || json.song || json.track || currentStation.name,
+                            artist: json.artist || currentStation.description,
+                            artwork: json.artwork || json.cover || json.image || currentStation.image_url
+                        });
+                    }
+                } catch (e) {
+                    // If not JSON, might be plain text "Artist - Title"
+                    if (text && text.length < 100) {
+                        const parts = text.split(' - ');
+                        setMetadata({
+                            title: parts.length > 1 ? parts[1] : text,
+                            artist: parts.length > 1 ? parts[0] : currentStation.name,
+                            artwork: currentStation.image_url
+                        });
+                    }
+                }
             }
         } catch (error) {
             console.error("Error fetching metadata:", error);
+            // Fallback on error
+            setMetadata({
+                title: currentStation.name,
+                artist: currentStation.description,
+                artwork: currentStation.image_url
+            });
         }
-    }, []);
+    }, [currentStation]);
 
     useEffect(() => {
         // eslint-disable-next-line react-hooks/set-state-in-effect
         fetchMetadata();
-        const interval = setInterval(fetchMetadata, 30000);
+        const interval = setInterval(() => fetchMetadata(), 30000);
         return () => clearInterval(interval);
-    }, [fetchMetadata]);
+    }, [currentStationId, fetchMetadata]);
 
     useEffect(() => {
         if (!mountRef.current) return;
@@ -377,7 +469,8 @@ export default function FlockingAudio() {
         // ======================
         // AUDIO SETUP
         // ======================
-        const audio = new Audio("https://shoutcast.webthreeradio.xyz/stream");
+        const station = getStationById(currentStationId);
+        const audio = new Audio(station?.streamUrl || "https://shoutcast.webthreeradio.xyz/stream");
         audio.crossOrigin = "anonymous";
         audio.loop = true;
         audioRef.current = audio;
@@ -576,6 +669,57 @@ export default function FlockingAudio() {
         };
     }, []);
 
+    // Vinyl rotation animation
+    useEffect(() => {
+        if (isPlaying && audioRef.current && !audioRef.current.paused) {
+            rotationIntervalRef.current = window.setInterval(() => {
+                setRotation(prev => (prev + 1) % 360);
+            }, 10);
+        } else {
+            if (rotationIntervalRef.current) {
+                clearInterval(rotationIntervalRef.current);
+            }
+        }
+        return () => {
+            if (rotationIntervalRef.current) {
+                clearInterval(rotationIntervalRef.current);
+            }
+        };
+    }, [isPlaying]);
+
+    // Tonearm animation
+    // Tonearm animation
+    useEffect(() => {
+        if (isPlaying && audioRef.current && !audioRef.current.paused) {
+            // Smooth transition to playing position
+            setArmRotation(-38);
+
+            // Assume average song length of 3 minutes (180s) for visual progress
+            const estimatedDuration = 180;
+
+            armIntervalRef.current = window.setInterval(() => {
+                setArmRotation(prev => {
+                    if (prev < -12) {
+                        return prev + (26 / estimatedDuration);
+                    }
+                    return prev;
+                });
+            }, 1000);
+        } else {
+            // Return to rest position
+            setArmRotation(-45);
+            if (armIntervalRef.current) {
+                clearInterval(armIntervalRef.current);
+            }
+        }
+        return () => {
+            if (armIntervalRef.current) {
+                clearInterval(armIntervalRef.current);
+            }
+        };
+    }, [isPlaying]);
+
+
     const togglePlay = () => {
         if (!audioRef.current || !audioCtxRef.current) return;
 
@@ -600,7 +744,7 @@ export default function FlockingAudio() {
     };
 
     return (
-        <div style={{ position: "relative", width: "100%", height: "100vh", overflow: "hidden", background: "#ffffff" }}>
+        <div style={{ position: "relative", width: "100%", height: "100vh", overflow: "hidden", background: "#1D1D1F" }}>
             <div ref={mountRef} style={{ width: "100%", height: "100%" }} />
 
             {/* Solana Wallet Button */}
@@ -608,160 +752,334 @@ export default function FlockingAudio() {
                 <AppKitButton />
             </div>
 
-            {/* iOS Style Glass Media Player */}
+            {/* Vinyl Record Player */}
             <div style={{
                 position: "absolute",
                 bottom: "50px",
                 left: "50%",
                 transform: "translateX(-50%)",
                 width: "92%",
-                maxWidth: "420px",
-                padding: "26px",
-                borderRadius: "32px",
-                background: "linear-gradient(135deg, rgba(255, 255, 255, 0.15), rgba(255, 255, 255, 0.05))",
-                backdropFilter: "blur(60px) saturate(220%) brightness(108%)",
-                WebkitBackdropFilter: "blur(60px) saturate(220%) brightness(108%)",
-                border: "1px solid rgba(255, 255, 255, 0.45)",
-                boxShadow: `
-                    0 10px 15px -3px rgba(0, 0, 0, 0.05), 
-                    0 20px 40px -10px rgba(0, 0, 0, 0.2), 
-                    0 30px 60px -15px rgba(0, 0, 0, 0.25),
-                    inset 0 1px 1px rgba(255, 255, 255, 0.4)
-                `,
-                fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', sans-serif",
-                color: "#1a1a1c",
+                maxWidth: "430px",
+                height: "190px",
+                borderRadius: "5px",
+                borderTopLeftRadius: "100px",
+                borderBottomLeftRadius: "100px",
+                background: "#1E2125",
+                border: "none",
+                boxShadow: "0 20px 60px rgba(0, 0, 0, 0.4)",
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Open Sans', sans-serif",
+                color: "#FFFFFF",
                 pointerEvents: "auto",
                 display: "flex",
-                flexDirection: "column",
-                gap: "22px",
+                flexDirection: "row",
+                gap: "0",
                 userSelect: "none"
             }}>
-                {/* Track Info */}
-                <div style={{ display: "flex", alignItems: "center", gap: "18px" }}>
+                {/* Vinyl Disc + Tonearm Section */}
+                <div style={{ position: "relative", width: "190px", height: "190px", flexShrink: 0 }}>
+                    {/* Tonearm */}
                     <div style={{
-                        width: "68px",
-                        height: "68px",
-                        borderRadius: "16px",
-                        background: metadata.artwork ? `url(${metadata.artwork}) center/cover no-repeat` : "linear-gradient(135deg, #FF3B30, #FF9500)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        boxShadow: "0 12px 24px rgba(255, 59, 48, 0.25)",
+                        width: "90px",
+                        height: "90px",
+                        position: "absolute",
+                        zIndex: 2,
+                        top: "15px",
+                        left: "110px",
+                        transformOrigin: "77.5% 18.5%",
+                        transform: `rotate(${armRotation}deg)`,
+                        backgroundImage: "url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iOTAiIGhlaWdodD0iOTAiIHZpZXdCb3g9IjAgMCA5MCA5MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImFybUdyYWQiIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjAlIj48c3RvcCBvZmZzZXQ9IjAlIiBzdHlsZT0ic3RvcC1jb2xvcjojYmJiYmJiO3N0b3Atb3BhY2l0eToxIiAvPjxzdG9wIG9mZnNldD0iMTAwJSIgc3R5bGU9InN0b3AtY29sb3I6Izc3Nzc3NztzdG9wLW9wYWNpdHk6MSIgLz48L2xpbmVhckdyYWRpZW50PjwvZGVmcz48cGF0aCBkPSJNIDcwIDE2IEwgNzAgNjUgTCA1NSA3NSBMIDIwIDc1IEwgMjAgNjIgTCA1NSA2MiBMIDU1IDI4IEwgNjAgMTggWiIgZmlsbD0idXJsKCNhcm1HcmFkKSIgc3Ryb2tlPSIjNTU1NTU1IiBzdHJva2Utd2lkdGg9IjEiLz48L3N2Zz4=')",
+                        backgroundSize: "contain",
+                        transition: armRotation === -45 || armRotation === -38 ? "transform 800ms cubic-bezier(0.4, 0, 0.2, 1)" : "none"
+                    }} />
+
+                    {/* Vinyl Disc */}
+                    <div style={{
+                        position: "absolute",
+                        width: "190px",
+                        height: "190px",
+                        borderRadius: "50%",
+                        background: "radial-gradient(circle at center, #1a1a1a 0%, #000000 70%, #1a1a1a 100%)",
+                        boxShadow: "inset 0 0 40px rgba(0,0,0,0.8), 0 8px 20px rgba(0,0,0,0.5)",
+                        transform: `rotate(${rotation}deg)`,
                         overflow: "hidden"
                     }}>
-                        {!metadata.artwork && (
-                            <svg width="34" height="34" viewBox="0 0 24 24" fill="white">
-                                <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
-                            </svg>
-                        )}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
+                        {/* Label Area with Album Art */}
                         <div style={{
-                            fontWeight: 800,
-                            fontSize: "20px",
-                            letterSpacing: "-0.6px",
-                            color: "#1a1a1c",
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis"
-                        }}>{metadata.title}</div>
-                        <div style={{
-                            fontSize: "15px",
-                            opacity: 0.55,
-                            marginTop: "2px",
-                            fontWeight: 500,
-                            color: "#1a1a1c",
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis"
-                        }}>{metadata.artist}</div>
-                    </div>
-                </div>
-
-                {/* Progress Bar (Visual for Live) */}
-                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                    <div style={{
-                        width: "100%",
-                        height: "5px",
-                        background: "rgba(0, 0, 0, 0.05)",
-                        borderRadius: "3px",
-                        overflow: "hidden",
-                        border: "1px solid rgba(0,0,0,0.02)"
-                    }}>
-                        <div style={{
-                            width: isPlaying ? "100%" : "0%",
-                            height: "100%",
-                            background: "linear-gradient(90deg, #1d1d1f, #444)",
-                            transition: "width 0.8s cubic-bezier(0.4, 0, 0.2, 1)"
-                        }} />
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: 700, opacity: 0.6, letterSpacing: "0.5px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-                            <div style={{ width: "7px", height: "7px", borderRadius: "50%", background: "#FF3B30", boxShadow: "0 0 8px rgba(255, 59, 48, 0.6)" }} />
-                            <span>LIVE</span>
-                        </div>
-                        <span>∞</span>
-                    </div>
-                </div>
-
-                {/* Controls */}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 15px" }}>
-                    <button style={{ background: "none", border: "none", cursor: "pointer", padding: "10px", color: "#1a1a1c", opacity: 0.35, transition: "opacity 0.2s" }} onMouseEnter={(e) => e.currentTarget.style.opacity = "0.7"} onMouseLeave={(e) => e.currentTarget.style.opacity = "0.35"}>
-                        <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" /></svg>
-                    </button>
-                    <button
-                        onClick={togglePlay}
-                        style={{
-                            background: "#1a1a1c",
-                            border: "none",
+                            position: "absolute",
+                            width: "75px",
+                            height: "75px",
+                            top: "50%",
+                            left: "50%",
+                            transform: "translate(-50%, -50%)",
                             borderRadius: "50%",
-                            width: "70px",
-                            height: "70px",
-                            cursor: "pointer",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            color: "#ffffff",
-                            boxShadow: "0 15px 30px rgba(0,0,0,0.15)",
-                            transition: "transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), background 0.2s"
-                        }}
-                        onMouseDown={(e) => e.currentTarget.style.transform = "scale(0.92)"}
-                        onMouseUp={(e) => e.currentTarget.style.transform = "scale(1)"}
-                    >
-                        {isPlaying ? (
-                            <svg width="34" height="34" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
-                        ) : (
-                            <svg width="34" height="34" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
-                        )}
-                    </button>
-                    <button style={{ background: "none", border: "none", cursor: "pointer", padding: "10px", color: "#1a1a1c", opacity: 0.35, transition: "opacity 0.2s" }} onMouseEnter={(e) => e.currentTarget.style.opacity = "0.7"} onMouseLeave={(e) => e.currentTarget.style.opacity = "0.35"}>
-                        <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" /></svg>
-                    </button>
+                            background: metadata.artwork ? `url(${metadata.artwork}) center/cover` : "linear-gradient(135deg, #0066CC, #0052A3)",
+                            border: "2px solid #333",
+                            boxShadow: "0 0 20px rgba(0,0,0,0.8)"
+                        }}>
+                            {/* Center Hole */}
+                            <div style={{
+                                position: "absolute",
+                                width: "8px",
+                                height: "8px",
+                                top: "50%",
+                                left: "50%",
+                                transform: "translate(-50%, -50%)",
+                                borderRadius: "50%",
+                                background: "#000",
+                                boxShadow: "0 0 3px rgba(255,255,255,0.3)"
+                            }} />
+                        </div>
+
+                        {/* Vinyl Grooves */}
+                        {[...Array(20)].map((_, i) => (
+                            <div key={i} style={{
+                                position: "absolute",
+                                width: `${190 - i * 4}px`,
+                                height: `${190 - i * 4}px`,
+                                top: "50%",
+                                left: "50%",
+                                transform: "translate(-50%, -50%)",
+                                borderRadius: "50%",
+                                border: "1px solid rgba(255,255,255,0.02)"
+                            }} />
+                        ))}
+                    </div>
                 </div>
 
-                {/* Volume Slider */}
-                <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "0 10px" }}>
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="rgba(0,0,0,0.4)"><path d="M3 9v6h4l5 5V4L7 9H3z" /></svg>
-                    <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.01"
-                        value={volume}
-                        onChange={handleVolumeChange}
-                        style={{
-                            flex: 1,
-                            accentColor: "#1d1d1f",
+                {/* Info Panel - wrapping rest of content */}
+                <div style={{ flex: 1, padding: "10px 20px", display: "flex", flexDirection: "column", gap: "10px", justifyContent: "space-between" }}>
+
+                    {/* Station Buttons (Scrollable) */}
+                    <div style={{
+                        display: "flex",
+                        gap: "10px",
+                        overflowX: "auto",
+                        paddingBottom: "10px",
+                        scrollbarWidth: "none", // Firefox
+                        msOverflowStyle: "none", // IE/Edge
+                        maskImage: "linear-gradient(to right, black 80%, transparent 100%)"
+                    }}>
+                        <style>{`
+                        div::-webkit-scrollbar { display: none; }
+                    `}</style>
+                        {STATIONS.map((station) => (
+                            <button
+                                key={station.id}
+                                onClick={() => {
+                                    if (currentStationId !== station.id) {
+                                        setCurrentStationId(station.id);
+                                        if (audioRef.current) {
+                                            const wasPlaying = isPlaying;
+                                            audioRef.current.src = station.streamUrl;
+                                            audioRef.current.load();
+                                            setRotation(0);
+                                            setArmRotation(-45);
+                                            if (wasPlaying) {
+                                                audioRef.current.play().catch(console.error);
+                                            }
+                                        }
+                                    }
+                                }}
+                                style={{
+                                    flexShrink: 0,
+                                    width: "40px",
+                                    height: "40px",
+                                    borderRadius: "50%",
+                                    border: currentStationId === station.id ? "2px solid #0066CC" : "1px solid rgba(255,255,255,0.1)",
+                                    background: "#1D1D1F",
+                                    overflow: "hidden",
+                                    cursor: "pointer",
+                                    transition: "all 0.2s",
+                                    transform: currentStationId === station.id ? "scale(1.1)" : "scale(1)",
+                                    boxShadow: currentStationId === station.id ? "0 4px 12px rgba(0, 102, 204, 0.4)" : "none"
+                                }}
+                                title={station.name}
+                            >
+                                <img
+                                    src={station.image_url}
+                                    alt={station.name}
+                                    style={{
+                                        width: "100%",
+                                        height: "100%",
+                                        objectFit: "cover",
+                                        opacity: currentStationId === station.id ? 1 : 0.7
+                                    }}
+                                />
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* Track Info & Progress */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
+                        <div>
+                            <h1 style={{
+                                margin: 0,
+                                fontSize: "14px",
+                                fontWeight: 700,
+                                color: "#FFFFFF",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap"
+                            }}>{metadata.title}</h1>
+                            <h4 style={{
+                                margin: "2px 0 0",
+                                fontSize: "11px",
+                                fontWeight: 400,
+                                color: "rgba(255, 255, 255, 0.6)",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap"
+                            }}>{metadata.artist}</h4>
+                        </div>
+
+                        {/* Live Progress Indicator */}
+                        <div style={{
+                            width: "100%",
                             height: "4px",
-                            cursor: "pointer",
-                            appearance: "none",
-                            background: "rgba(0,0,0,0.1)",
-                            borderRadius: "2px"
-                        }}
-                    />
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="rgba(0,0,0,0.4)"><path d="M14 8.83v6.34L11.83 13H9v-2h2.83L14 8.83M16 4l-1.5 1.5C17.5 8 17.5 16 14.5 18.5L16 20c4.5-5 4.5-11 0-16z" /></svg>
+                            background: "rgba(255, 255, 255, 0.1)",
+                            borderRadius: "2px",
+                            overflow: "hidden",
+                            marginTop: "5px"
+                        }}>
+                            <div style={{
+                                width: "100%",
+                                height: "100%",
+                                background: "linear-gradient(90deg, #0066CC, #4D94FF)",
+                                boxShadow: "0 0 10px rgba(0, 102, 204, 0.5)",
+                                animation: isPlaying ? "pulse 2s infinite" : "none"
+                            }} />
+                        </div>
+                    </div>
+
+                    {/* Controls */}
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "20px", marginTop: "5px" }}>
+                        {/* Previous Button */}
+                        <button
+                            onClick={() => {
+                                const currentIndex = STATIONS.findIndex(s => s.id === currentStationId);
+                                const prevIndex = currentIndex - 1 < 0 ? STATIONS.length - 1 : currentIndex - 1;
+                                setCurrentStationId(STATIONS[prevIndex].id);
+                                if (audioRef.current) {
+                                    const wasPlaying = isPlaying;
+                                    audioRef.current.src = STATIONS[prevIndex].streamUrl;
+                                    audioRef.current.load();
+                                    setRotation(0);
+                                    setArmRotation(-45);
+                                    if (wasPlaying) {
+                                        audioRef.current.play().catch(console.error);
+                                    }
+                                }
+                            }}
+                            style={{
+                                background: "none",
+                                border: "none",
+                                cursor: "pointer",
+                                padding: "8px",
+                                color: "#FFFFFF",
+                                opacity: 0.7,
+                                transition: "opacity 0.2s"
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.opacity = "1"}
+                            onMouseLeave={(e) => e.currentTarget.style.opacity = "0.7"}
+                        >
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" />
+                            </svg>
+                        </button>
+
+                        {/* Play/Pause Button */}
+                        <button
+                            onClick={togglePlay}
+                            style={{
+                                background: "#FFFFFF",
+                                border: "none",
+                                borderRadius: "50%",
+                                width: "45px",
+                                height: "45px",
+                                cursor: "pointer",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                color: "#1E2125",
+                                boxShadow: "0 4px 12px rgba(255, 255, 255, 0.3)",
+                                transition: "transform 0.2s cubic-bezier(0.4, 0, 0.2, 1)"
+                            }}
+                            onMouseDown={(e) => e.currentTarget.style.transform = "scale(0.92)"}
+                            onMouseUp={(e) => e.currentTarget.style.transform = "scale(1)"}
+                            onMouseEnter={(e) => e.currentTarget.style.background = "#F0F0F0"}
+                            onMouseLeave={(e) => e.currentTarget.style.background = "#FFFFFF"}
+                        >
+                            {isPlaying ? (
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                    <rect x="6" y="4" width="4" height="16" />
+                                    <rect x="14" y="4" width="4" height="16" />
+                                </svg>
+                            ) : (
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style={{ marginLeft: "2px" }}>
+                                    <path d="M8 5v14l11-7z" />
+                                </svg>
+                            )}
+                        </button>
+
+                        {/* Next Button */}
+                        <button
+                            onClick={() => {
+                                const currentIndex = STATIONS.findIndex(s => s.id === currentStationId);
+                                const nextIndex = (currentIndex + 1) % STATIONS.length;
+                                setCurrentStationId(STATIONS[nextIndex].id);
+                                if (audioRef.current) {
+                                    const wasPlaying = isPlaying;
+                                    audioRef.current.src = STATIONS[nextIndex].streamUrl;
+                                    audioRef.current.load();
+                                    setRotation(0);
+                                    setArmRotation(-45);
+                                    if (wasPlaying) {
+                                        audioRef.current.play().catch(console.error);
+                                    }
+                                }
+                            }}
+                            style={{
+                                background: "none",
+                                border: "none",
+                                cursor: "pointer",
+                                padding: "8px",
+                                color: "#FFFFFF",
+                                opacity: 0.7,
+                                transition: "opacity 0.2s"
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.opacity = "1"}
+                            onMouseLeave={(e) => e.currentTarget.style.opacity = "0.7"}
+                        >
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+                            </svg>
+                        </button>
+                    </div>
+
+                    {/* Volume Slider */}
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "0 10px" }}>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="rgba(29, 29, 31, 0.4)"><path d="M3 9v6h4l5 5V4L7 9H3z" /></svg>
+                        <input
+                            type="range"
+                            min="0"
+                            max="1"
+                            step="0.01"
+                            value={volume}
+                            onChange={handleVolumeChange}
+                            style={{
+                                flex: 1,
+                                accentColor: "#0066CC",
+                                height: "4px",
+                                cursor: "pointer",
+                                appearance: "none",
+                                background: "rgba(29, 29, 31, 0.1)",
+                                borderRadius: "2px"
+                            }}
+                        />
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="rgba(29, 29, 31, 0.4)"><path d="M14 8.83v6.34L11.83 13H9v-2h2.83L14 8.83M16 4l-1.5 1.5C17.5 8 17.5 16 14.5 18.5L16 20c4.5-5 4.5-11 0-16z" /></svg>
+                    </div>
                 </div>
-            </div>
+            </div> {/* Close Info Panel */}
         </div>
     );
 }
