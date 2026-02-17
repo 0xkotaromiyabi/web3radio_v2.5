@@ -775,6 +775,43 @@ export default function FlockingAudio() {
                 gap: "0",
                 userSelect: "none"
             }}>
+                {/* Artwork Popup */}
+                <div style={{
+                    position: "absolute",
+                    bottom: "100%", // Anchored to top of player
+                    left: "50%",
+                    marginBottom: "30px", // Gap above player
+                    transform: isPlaying && (metadata.artwork || currentStation?.image_url) ? "translateX(-50%) translateY(0) scale(1)" : "translateX(-50%) translateY(20px) scale(0.9)",
+                    opacity: isPlaying && (metadata.artwork || currentStation?.image_url) ? 1 : 0,
+                    transition: "all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)",
+                    width: "50%", // 50% of player width
+                    maxWidth: "200px",
+                    aspectRatio: "1/1",
+                    borderRadius: "12px",
+                    boxShadow: "0 20px 50px rgba(0,0,0,0.5)",
+                    background: "#1E2125",
+                    zIndex: 10,
+                    pointerEvents: "none",
+                    border: "4px solid #1E2125",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    overflow: "hidden"
+                }}>
+                    {(metadata.artwork || currentStation?.image_url) && (
+                        <img
+                            src={metadata.artwork || currentStation?.image_url}
+                            alt="Now Playing"
+                            style={{
+                                width: "100%",
+                                height: "100%",
+                                objectFit: "cover",
+                                borderRadius: "8px"
+                            }}
+                        />
+                    )}
+                </div>
+
                 {/* Vinyl Disc + Tonearm Section */}
                 <div style={{ position: "relative", width: "190px", height: "190px", flexShrink: 0 }}>
                     {/* Tonearm */}
@@ -803,7 +840,7 @@ export default function FlockingAudio() {
                         transform: `rotate(${rotation}deg)`,
                         overflow: "hidden"
                     }}>
-                        {/* Label Area with Album Art */}
+                        {/* Label Area with Station Logo */}
                         <div style={{
                             position: "absolute",
                             width: "75px",
@@ -812,7 +849,7 @@ export default function FlockingAudio() {
                             left: "50%",
                             transform: "translate(-50%, -50%)",
                             borderRadius: "50%",
-                            background: metadata.artwork ? `url(${metadata.artwork}) center/cover` : "linear-gradient(135deg, #0066CC, #0052A3)",
+                            background: currentStation?.image_url ? `url(${currentStation.image_url}) center/cover` : "linear-gradient(135deg, #0066CC, #0052A3)",
                             border: "2px solid #333",
                             boxShadow: "0 0 20px rgba(0,0,0,0.8)"
                         }}>
@@ -849,65 +886,6 @@ export default function FlockingAudio() {
                 {/* Info Panel - wrapping rest of content */}
                 <div style={{ flex: 1, padding: "10px 20px", display: "flex", flexDirection: "column", gap: "10px", justifyContent: "space-between" }}>
 
-                    {/* Station Buttons (Scrollable) */}
-                    <div style={{
-                        display: "flex",
-                        gap: "10px",
-                        overflowX: "auto",
-                        paddingBottom: "10px",
-                        scrollbarWidth: "none", // Firefox
-                        msOverflowStyle: "none", // IE/Edge
-                        maskImage: "linear-gradient(to right, black 80%, transparent 100%)"
-                    }}>
-                        <style>{`
-                        div::-webkit-scrollbar { display: none; }
-                    `}</style>
-                        {STATIONS.map((station) => (
-                            <button
-                                key={station.id}
-                                onClick={() => {
-                                    if (currentStationId !== station.id) {
-                                        setCurrentStationId(station.id);
-                                        if (audioRef.current) {
-                                            const wasPlaying = isPlaying;
-                                            audioRef.current.src = station.streamUrl;
-                                            audioRef.current.load();
-                                            setRotation(0);
-                                            setArmRotation(-45);
-                                            if (wasPlaying) {
-                                                audioRef.current.play().catch(console.error);
-                                            }
-                                        }
-                                    }
-                                }}
-                                style={{
-                                    flexShrink: 0,
-                                    width: "40px",
-                                    height: "40px",
-                                    borderRadius: "50%",
-                                    border: currentStationId === station.id ? "2px solid #0066CC" : "1px solid rgba(255,255,255,0.1)",
-                                    background: "#1D1D1F",
-                                    overflow: "hidden",
-                                    cursor: "pointer",
-                                    transition: "all 0.2s",
-                                    transform: currentStationId === station.id ? "scale(1.1)" : "scale(1)",
-                                    boxShadow: currentStationId === station.id ? "0 4px 12px rgba(0, 102, 204, 0.4)" : "none"
-                                }}
-                                title={station.name}
-                            >
-                                <img
-                                    src={station.image_url}
-                                    alt={station.name}
-                                    style={{
-                                        width: "100%",
-                                        height: "100%",
-                                        objectFit: "cover",
-                                        opacity: currentStationId === station.id ? 1 : 0.7
-                                    }}
-                                />
-                            </button>
-                        ))}
-                    </div>
 
                     {/* Track Info & Progress */}
                     <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
@@ -1080,6 +1058,75 @@ export default function FlockingAudio() {
                     </div>
                 </div>
             </div> {/* Close Info Panel */}
+            {/* Station Buttons (Bottom Strip) */}
+            <div style={{
+                position: "absolute",
+                bottom: "20px",
+                left: "50%",
+                transform: "translateX(-50%)",
+                width: "92%",
+                maxWidth: "430px",
+                zIndex: 1002,
+                display: "flex",
+                gap: "10px",
+                overflowX: "auto",
+                paddingBottom: "10px",
+                scrollbarWidth: "none",
+                msOverflowStyle: "none",
+                background: "rgba(0,0,0,0.3)", // Add background to ensure visibility
+                borderRadius: "12px",
+                padding: "10px" // Add padding inside container
+            }}>
+                <style>{`
+                div::-webkit-scrollbar { display: none; }
+            `}</style>
+                {STATIONS.map((station) => (
+                    <button
+                        key={station.id}
+                        onClick={() => {
+                            if (currentStationId !== station.id) {
+                                setCurrentStationId(station.id);
+                                if (audioRef.current) {
+                                    const wasPlaying = isPlaying;
+                                    audioRef.current.src = station.streamUrl;
+                                    audioRef.current.load();
+                                    setRotation(0);
+                                    setArmRotation(-45);
+                                    if (wasPlaying) {
+                                        audioRef.current.play().catch(console.error);
+                                    }
+                                }
+                            }
+                        }}
+                        style={{
+                            flexShrink: 0,
+                            width: "50px", // Slightly larger for easier touch
+                            height: "50px",
+                            borderRadius: "50%",
+                            border: currentStationId === station.id ? "2px solid #0066CC" : "1px solid rgba(255,255,255,0.2)",
+                            background: "#1D1D1F",
+                            overflow: "hidden",
+                            cursor: "pointer",
+                            transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+                            transform: currentStationId === station.id ? "scale(1.15)" : "scale(1)",
+                            boxShadow: currentStationId === station.id ? "0 4px 12px rgba(0, 102, 204, 0.6)" : "0 2px 8px rgba(0,0,0,0.3)"
+                        }}
+                        title={station.name}
+                    >
+                        <img
+                            src={station.image_url}
+                            alt={station.name}
+                            style={{
+                                width: "100%",
+                                height: "100%",
+                                objectFit: "cover",
+                                opacity: currentStationId === station.id ? 1 : 0.6
+                            }}
+                        />
+                    </button>
+                ))}
+            </div>
+
         </div>
     );
 }
