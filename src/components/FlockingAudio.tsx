@@ -285,11 +285,33 @@ const birdFS = `
     uniform vec3 color;
 
     void main() {
-        // Fake colors for now
+        // Mix vertex color with the dynamic uniform color
         float z2 = 0.2 + ( 1000. - z ) / 1000. * vColor.x;
-        gl_FragColor = vec4( z2, z2, z2, 1. );
+        gl_FragColor = vec4( color * z2, 1. );
     }
 `;
+
+function getSkyColor() {
+    const hour = new Date().getHours();
+
+    if (hour >= 5 && hour < 7) {
+        return new THREE.Color("#FF8C42"); // dawn
+    }
+    if (hour >= 7 && hour < 12) {
+        return new THREE.Color("#87CEEB"); // pagi
+    }
+    if (hour >= 12 && hour < 16) {
+        return new THREE.Color("#4FC3F7"); // siang
+    }
+    if (hour >= 16 && hour < 18) {
+        return new THREE.Color("#FF7043"); // sunset
+    }
+    if (hour >= 18 && hour < 22) {
+        return new THREE.Color("#1A237E"); // malam awal
+    }
+
+    return new THREE.Color("#000011"); // midnight
+}
 
 export default function FlockingAudio() {
     const mountRef = useRef<HTMLDivElement>(null);
@@ -387,6 +409,7 @@ export default function FlockingAudio() {
         const dtVelocity = gpuCompute.createTexture();
 
         // Fill position texture
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const posArray = (dtPosition.image as any).data;
         for (let k = 0, kl = posArray.length; k < kl; k += 4) {
             posArray[k + 0] = Math.random() * BOUNDS - BOUNDS_HALF;
@@ -396,6 +419,7 @@ export default function FlockingAudio() {
         }
 
         // Fill velocity texture
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const velArray = (dtVelocity.image as any).data;
         for (let k = 0, kl = velArray.length; k < kl; k += 4) {
             velArray[k + 0] = (Math.random() - 0.5) * 10;
@@ -506,6 +530,16 @@ export default function FlockingAudio() {
 
             birdUniforms["texturePosition"].value = gpuCompute.getCurrentRenderTarget(positionVariable).texture;
             birdUniforms["textureVelocity"].value = gpuCompute.getCurrentRenderTarget(velocityVariable).texture;
+
+            // warna birds ikut audio - Hue shift based on energy
+            birdUniforms["color"].value.setHSL(energy, 1.0, 0.5);
+
+            // 🌅 background ikut waktu
+            const targetColor = getSkyColor();
+            (scene.background as THREE.Color).lerp(targetColor, 0.01);
+            if (scene.fog instanceof THREE.Fog) {
+                scene.fog.color.copy(scene.background as THREE.Color);
+            }
 
             renderer.render(scene, camera);
         };
