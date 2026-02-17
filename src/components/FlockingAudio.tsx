@@ -387,7 +387,7 @@ export default function FlockingAudio() {
         const dtVelocity = gpuCompute.createTexture();
 
         // Fill position texture
-        const posArray = dtPosition.image.data;
+        const posArray = (dtPosition.image as any).data;
         for (let k = 0, kl = posArray.length; k < kl; k += 4) {
             posArray[k + 0] = Math.random() * BOUNDS - BOUNDS_HALF;
             posArray[k + 1] = Math.random() * BOUNDS - BOUNDS_HALF;
@@ -396,7 +396,7 @@ export default function FlockingAudio() {
         }
 
         // Fill velocity texture
-        const velArray = dtVelocity.image.data;
+        const velArray = (dtVelocity.image as any).data;
         for (let k = 0, kl = velArray.length; k < kl; k += 4) {
             velArray[k + 0] = (Math.random() - 0.5) * 10;
             velArray[k + 1] = (Math.random() - 0.5) * 10;
@@ -439,8 +439,8 @@ export default function FlockingAudio() {
         const geometry = createBirdGeometry();
         const birdUniforms = {
             "color": { value: new THREE.Color(0xff2200) },
-            "texturePosition": { value: null },
-            "textureVelocity": { value: null },
+            "texturePosition": { value: null as THREE.Texture | null },
+            "textureVelocity": { value: null as THREE.Texture | null },
             "time": { value: 1.0 },
             "delta": { value: 0.0 }
         };
