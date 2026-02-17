@@ -346,77 +346,106 @@ export default function FlockingAudio() {
         }
 
         try {
-            // Special handling based on station type
-            if (currentStation.type === 'shoutcast') {
-                const response = await fetch(currentStation.metadataUrl);
-                const data = await response.json(); // Shoutcast JSON
-                // Handle Web3 Radio specific format or standard Shoutcast
-                if (data && data.nowPlaying) {
-                    setMetadata({
-                        title: data.nowPlaying.title || currentStation.name,
-                        artist: data.nowPlaying.artist || currentStation.description,
-                        artwork: data.nowPlaying.artwork || currentStation.image_url
-                    });
-                } else if (data) {
-                    // Standard Shoutcast JSON often has different structure, adjust as needed
-                    setMetadata({
-                        title: data.songtitle || currentStation.name,
-                        artist: currentStation.description,
-                        artwork: currentStation.image_url
-                    });
-                }
-            } else if (currentStation.type === 'icecast') {
-                // Icecast JSON (often status-json.xsl)
-                try {
-                    const response = await fetch(currentStation.metadataUrl);
-                    const data = await response.json();
-                    const source = data.icestats && data.icestats.source ?
-                        (Array.isArray(data.icestats.source) ? data.icestats.source[0] : data.icestats.source) : null;
+            // Use proxy to avoid CORS
+            const proxyUrl = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(currentStation.metadataUrl);
 
-                    if (source && source.title) {
-                        const parts = source.title.split(' - ');
-                        setMetadata({
-                            title: parts.length > 1 ? parts[1] : source.title,
-                            artist: parts.length > 1 ? parts[0] : currentStation.name,
-                            artwork: currentStation.image_url // Icecast usually doesn't provide artwork in status-json
-                        });
+            if (currentStation.type === 'shoutcast') {
+                const response = await fetch(proxyUrl);
+                const text = await response.text();
+
+                let title = '';
+
+                // Try JSON first
+                try {
+                    const json = JSON.parse(text);
+                    if (json.listenlog && json.listenlog.length > 0) {
+                        title = json.listenlog[0].title;
+                    } else if (json.currentsong) {
+                        title = json.currentsong;
+                    } else if (json.songtitle) {
+                        title = json.songtitle;
+                    } else if (json.nowPlaying) {
+                        title = json.nowPlaying.title || '';
                     }
                 } catch (e) {
-                    console.warn("Icecast fetch failed", e);
-                    // Fallback
+                    // Not JSON
+                }
+
+                // If no title from JSON, try XML/Text
+                if (!title) {
+                    if (text.includes('<SONGTITLE>')) {
+                        const match = text.match(/<SONGTITLE>(.*?)<\/SONGTITLE>/);
+                        if (match) title = match[1];
+                    } else if (text.includes(',')) {
+                        // Shoutcast 7.html often returns numbers,serverstatus,listenercount,etc,songtitle
+                        const parts = text.split(',');
+                        if (parts.length > 6) {
+                            title = parts[6];
+                        }
+                    }
+                }
+
+                if (title) {
+                    const parts = title.split(' - ');
                     setMetadata({
-                        title: currentStation.name,
-                        artist: currentStation.description,
+                        title: parts.length > 1 ? parts[1] : title,
+                        artist: parts.length > 1 ? parts[0] : currentStation.name,
+                        artwork: ''
+                    });
+
+                    if (parts.length > 0) {
+                        try {
+                            const term = encodeURIComponent(title);
+                            const artRes = await fetch(`https://itunes.apple.com/search?term=${term}&media=music&limit=1`);
+                            const artData = await artRes.json();
+                            if (artData.results && artData.results.length > 0) {
+                                const art = artData.results[0].artworkUrl100.replace('100x100', '600x600');
+                                setMetadata(prev => ({ ...prev, artwork: art }));
+                            }
+                        } catch (e) { console.error("Artwork fetch failed", e); }
+                    }
+                }
+
+            } else if (currentStation.type === 'icecast') {
+                const response = await fetch(proxyUrl);
+                const data = await response.json();
+
+                let source = data.icestats?.source;
+                if (Array.isArray(source)) source = source[0];
+
+                if (source && (source.title || source.artist)) {
+                    const parts = source.title ? source.title.split(' - ') : [];
+                    setMetadata({
+                        title: parts.length > 1 ? parts[1] : source.title || currentStation.name,
+                        artist: parts.length > 1 ? parts[0] : source.artist || currentStation.description,
                         artwork: currentStation.image_url
                     });
                 }
 
             } else if (currentStation.type === 'radiojar') {
-                const response = await fetch(currentStation.metadataUrl);
+                const response = await fetch(proxyUrl);
                 const data = await response.json();
                 if (data && (data.title || data.artist)) {
                     setMetadata({
-                        title: data.title || currentStation.name,
-                        artist: data.artist || currentStation.description,
-                        artwork: data.thumb || data.cover || currentStation.image_url
+                        title: data.title || 'Unknown Title',
+                        artist: data.artist || currentStation.name,
+                        artwork: data.thumb || ''
                     });
                 }
             } else {
-                // Plain text or generic JSON - try basic fetch
-                const response = await fetch(currentStation.metadataUrl);
+                // Plain text or generic fallback
+                const response = await fetch(proxyUrl);
                 const text = await response.text();
                 try {
                     const json = JSON.parse(text);
-                    // Try to adhere to common formats
                     if (json.title || json.song || json.track) {
                         setMetadata({
                             title: json.title || json.song || json.track || currentStation.name,
                             artist: json.artist || currentStation.description,
-                            artwork: json.artwork || json.cover || json.image || currentStation.image_url
+                            artwork: json.artwork || json.cover || ''
                         });
                     }
                 } catch (e) {
-                    // If not JSON, might be plain text "Artist - Title"
                     if (text && text.length < 100) {
                         const parts = text.split(' - ');
                         setMetadata({
@@ -429,7 +458,6 @@ export default function FlockingAudio() {
             }
         } catch (error) {
             console.error("Error fetching metadata:", error);
-            // Fallback on error
             setMetadata({
                 title: currentStation.name,
                 artist: currentStation.description,
