@@ -1,4 +1,3 @@
-
 export interface Station {
     id: string;
     name: string;
@@ -7,7 +6,8 @@ export interface Station {
     description: string;
     image_url: string;
     metadataUrl?: string;
-    type?: 'shoutcast' | 'icecast' | 'radiojar' | 'plain';
+    type?: 'shoutcast' | 'icecast' | 'radiojar' | 'plain' | 'zeno';
+    mount?: string;
 }
 
 export const STATIONS: Station[] = [
@@ -19,20 +19,22 @@ export const STATIONS: Station[] = [
         description: 'The Future of Radio',
         image_url: 'https://webthreeradio.xyz/assets/web3radio-logo.png',
         metadataUrl: 'https://shoutcast.webthreeradio.xyz/currentsong?sid=1',
-        type: 'shoutcast'
+        type: 'shoutcast',
+        mount: '/stream'
     },
     {
-        id: 'oz_radio',
+        id: 'ozradio',
         name: 'Oz Radio Jakarta',
         streamUrl: 'https://streaming.ozradiojakarta.com:8443/oz_jakarta',
         genre: 'Top 40',
         description: 'Oz Radio Jakarta',
         image_url: 'https://www.ozradiojakarta.com/wp-content/uploads/2023/10/Oz-Radio-Jakarta-Logo.png',
         metadataUrl: 'https://streaming.ozradiojakarta.com:8443/status-json.xsl',
-        type: 'icecast'
+        type: 'icecast',
+        mount: '/ozjakarta'
     },
     {
-        id: 'i_radio',
+        id: 'iradio',
         name: 'i-Radio',
         streamUrl: 'https://stream.radiojar.com/4ywdgup3bnzuv',
         genre: 'Indonesian Pop',
@@ -42,24 +44,24 @@ export const STATIONS: Station[] = [
         type: 'radiojar'
     },
     {
-        id: 'female_radio',
+        id: 'female',
         name: 'Female Radio',
         streamUrl: 'https://s1.cloudmu.id/listen/female_radio/radio',
         genre: 'Adult Contemporary',
         description: 'Love Life, Love Music',
         image_url: 'https://upload.wikimedia.org/wikipedia/commons/e/e0/Female_Radio_Logo.png',
         metadataUrl: 'https://s1.cloudmu.id/listen/female_radio/currentsong?sid=1',
-        type: 'plain'
+        type: 'shoutcast'
     },
     {
-        id: 'delta_fm',
+        id: 'delta',
         name: 'Delta FM',
         streamUrl: 'https://s1.cloudmu.id/listen/delta_fm/radio',
         genre: 'Easy Listening',
         description: 'Lagu Enak',
         image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c8/Delta_FM_Logo.png/640px-Delta_FM_Logo.png',
         metadataUrl: 'https://s1.cloudmu.id/listen/delta_fm/currentsong?sid=1',
-        type: 'plain'
+        type: 'shoutcast'
     },
     {
         id: 'prambors',
@@ -69,7 +71,7 @@ export const STATIONS: Station[] = [
         description: 'Indonesia No. 1 Hit Music Station',
         image_url: 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a2/Prambors_FM_Logo.png/1200px-Prambors_FM_Logo.png',
         metadataUrl: 'https://s2.cloudmu.id/listen/prambors/currentsong?sid=1',
-        type: 'plain'
+        type: 'shoutcast'
     }
 ];
 
