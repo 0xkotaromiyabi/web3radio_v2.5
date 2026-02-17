@@ -333,7 +333,7 @@ export default function FlockingAudio() {
             const data = await response.json();
             if (data && data.nowPlaying) {
                 const title = data.nowPlaying.title || "Web3 Radio";
-                const artist = data.nowPlaying.artist || "3D Flocking Birds Stream";
+                const artist = data.nowPlaying.artist || "Decentralized Radio Station";
                 const artwork = data.nowPlaying.artwork || "https://webthreeradio.xyz/assets/web3radio-logo.png";
 
                 setMetadata(prev => {
@@ -765,3 +765,4 @@ export default function FlockingAudio() {
         </div>
     );
 }
+
